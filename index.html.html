@@ -2750,7 +2750,7 @@
 <body>
 
 <!-- ─── LOGIN SCREEN ─── -->
-<div id="loginScreen">
+<div id="loginScreen" class="hidden">
   <div class="login-box">
     <div class="login-logo">8 <span>Journals</span></div>
     <div class="login-sub">// track · analyze · improve</div>
@@ -5554,22 +5554,38 @@ async function loadAppData(userId) {
   const loadEl = document.getElementById('appLoadingOverlay');
   loadEl.classList.remove('hidden');
 
-  // Load accounts
-  const { data: acctData, error: acctErr } = await _supabase
-    .from('accounts').select('*').eq('user_id', userId).order('created_at');
-  if (!acctErr && acctData) accounts = acctData;
+  // Helper: race a promise against a timeout
+  function withTimeout(promise, ms) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+    ]);
+  }
 
-  // Load trades — normalise account_id → accountId for existing JS
-  const { data: tradeData, error: tradeErr } = await _supabase
-    .from('trades').select('*').eq('user_id', userId).order('date', { ascending: false });
-  if (!tradeErr && tradeData) {
-    trades = tradeData.map(t => ({ ...t, accountId: t.account_id }));
+  try {
+    // Load accounts with 10s timeout
+    const acctRes = await withTimeout(
+      _supabase.from('accounts').select('*').eq('user_id', userId).order('created_at'),
+      10000
+    );
+    if (!acctRes.error && acctRes.data) accounts = acctRes.data;
+
+    // Load trades with 10s timeout
+    const tradeRes = await withTimeout(
+      _supabase.from('trades').select('*').eq('user_id', userId).order('date', { ascending: false }),
+      10000
+    );
+    if (!tradeRes.error && tradeRes.data) {
+      trades = tradeRes.data.map(t => ({ ...t, accountId: t.account_id }));
+    }
+  } catch(e) {
+    console.error('loadAppData error:', e.message);
+    // Still show the app even if data fails — user can retry
   }
 
   loadEl.classList.add('hidden');
   document.getElementById('loginScreen').classList.add('hidden');
 
-  // Boot the app
   renderAccounts();
   populateAccountDropdown();
   render();
