@@ -2750,7 +2750,7 @@
 <body>
 
 <!-- ─── LOGIN SCREEN ─── -->
-<div id="loginScreen" class="hidden">
+<div id="loginScreen">
   <div class="login-box">
     <div class="login-logo">📈 Trading <span>Journal</span></div>
     <div class="login-sub">// track · analyze · improve</div>
@@ -5545,7 +5545,9 @@ async function handleMagicLink() {
 
 async function handleSignOut() {
   await _supabase.auth.signOut();
-  // UI cleanup is handled by onAuthStateChange SIGNED_OUT event
+  trades = []; accounts = [];
+  document.getElementById('loginScreen').classList.remove('hidden');
+  document.getElementById('loginMsg') && (document.getElementById('loginMsg').className = 'login-msg');
 }
 
 async function loadAppData(userId) {
@@ -5575,35 +5577,23 @@ async function loadAppData(userId) {
   refreshEquityData();
 }
 
-// ── AUTH INIT ──────────────────────────────────────────────────────
-// Step 1: On every page load, immediately check localStorage for an
-//         existing session. This is synchronous-ish and avoids the
-//         flash of the login screen before onAuthStateChange fires.
-(async () => {
-  const { data: { session } } = await _supabase.auth.getSession();
-  if (session?.user) {
-    // Already logged in — load app straight away
-    await loadAppData(session.user.id);
-  } else {
-    // Genuinely not logged in — show login screen
-    document.getElementById('appLoadingOverlay').classList.add('hidden');
-    document.getElementById('loginScreen').classList.remove('hidden');
-  }
-})();
-
-// Step 2: Listen for real auth events that happen AFTER page load
-//         (sign in, sign out, token refresh, etc.)
+// Auth state listener — fires on page load and on sign in/out
 _supabase.auth.onAuthStateChange(async (event, session) => {
-  if (event === 'SIGNED_IN') {
-    // User just signed in (not a reload) — load app
+  // Ignore the TOKEN_REFRESHED event to avoid re-running loadAppData mid-session
+  if (event === 'TOKEN_REFRESHED') return;
+
+  if (session?.user) {
     await loadAppData(session.user.id);
-  } else if (event === 'SIGNED_OUT') {
-    // Explicit sign-out — show login screen
-    trades = []; accounts = [];
+  } else if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+    // Only show login screen on an explicit sign-out, not on cold page load
     document.getElementById('appLoadingOverlay').classList.add('hidden');
     document.getElementById('loginScreen').classList.remove('hidden');
   }
-  // Ignore: INITIAL_SESSION, TOKEN_REFRESHED, USER_UPDATED, etc.
+  // For INITIAL_SESSION with no user (truly logged out), also show login
+  else if (event === 'INITIAL_SESSION' && !session) {
+    document.getElementById('appLoadingOverlay').classList.add('hidden');
+    document.getElementById('loginScreen').classList.remove('hidden');
+  }
 });
 
 
