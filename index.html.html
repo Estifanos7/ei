@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">8
-  <title>Journals </title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>📈 Trading Journal</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>
     /* ─── LOGIN SCREEN ─── */
@@ -2752,7 +2752,7 @@
 <!-- ─── LOGIN SCREEN ─── -->
 <div id="loginScreen" class="hidden">
   <div class="login-box">
-    <div class="login-logo">8 <span>Journals</span></div>
+    <div class="login-logo">📈 Trading <span>Journal</span></div>
     <div class="login-sub">// track · analyze · improve</div>
     <div class="login-card">
       <div class="login-card-title" id="loginCardTitle">Sign In</div>
@@ -2794,7 +2794,7 @@
     <div class="header-left">
       <!-- Home title -->
       <div class="header-title-home">
-        <h1>8<span>Journal</span></h1>
+        <h1>📈 Trading <span>Journal</span></h1>
         <div class="subtitle">// track · analyze · improve</div>
       </div>
       <!-- Lot Size Calc title -->
@@ -5477,7 +5477,15 @@ const SUPABASE_URL  = 'https://hbltuiycqrkrxnfnxtoc.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhibHR1aXljcXJrcnhuZm54dG9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyNjQ5MzIsImV4cCI6MjA5Mzg0MDkzMn0.xIsukbhArGNbBThDZhJ3Jck4BOpTZANBY3I6SP_uOrI';
 // ─────────────────────────────────────────────────────────────────
 
-const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
+  auth: {
+    persistSession:   true,
+    storageKey:       'trading-journal-auth',
+    storage:          window.localStorage,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  }
+});
 
 let _signupMode = false;
 
@@ -5518,13 +5526,10 @@ async function handleLogin() {
     if (error) { setLoginMsg(error.message); return; }
     setLoginMsg('Account created! Check your email to confirm, then sign in.', 'success');
   } else {
-    const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
+    const { error } = await _supabase.auth.signInWithPassword({ email, password });
     setLoginLoading(false);
     if (error) { setLoginMsg(error.message); return; }
-    if (data?.user) {
-      _appLoaded = true;
-      await loadAppData(data.user.id);
-    }
+    // onAuthStateChange will handle showing the app
   }
 }
 
@@ -5539,58 +5544,33 @@ async function handleMagicLink() {
 }
 
 async function handleSignOut() {
-  await _supabase.auth.signOut();
-  _appLoaded = false;
+  await _supabase.auth.signOut({ scope: 'local' });
   trades = []; accounts = [];
-  try { renderAccounts(); } catch(e) {}
-  try { populateAccountDropdown(); } catch(e) {}
-  try { render(); } catch(e) {}
   document.getElementById('loginScreen').classList.remove('hidden');
-  const _msgEl = document.getElementById('loginMsg');
-  if (_msgEl) _msgEl.className = 'login-msg';
+  const msgEl = document.getElementById('loginMsg');
+  if (msgEl) msgEl.className = 'login-msg';
 }
 
 async function loadAppData(userId) {
   const loadEl = document.getElementById('appLoadingOverlay');
   loadEl.classList.remove('hidden');
 
-  function withTimeout(promise, ms) {
-    return Promise.race([
-      promise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
-    ]);
-  }
+  // Load accounts
+  const { data: acctData, error: acctErr } = await _supabase
+    .from('accounts').select('*').eq('user_id', userId).order('created_at');
+  if (!acctErr && acctData) accounts = acctData;
 
-  // Helper to fetch with one automatic retry
-  async function fetchWithRetry(queryFn) {
-    try {
-      const res = await withTimeout(queryFn(), 10000);
-      // If empty on first try, wait 800ms and retry once
-      if (!res.error && res.data && res.data.length === 0) {
-        await new Promise(r => setTimeout(r, 800));
-        return await withTimeout(queryFn(), 10000);
-      }
-      return res;
-    } catch(e) {
-      return { data: null, error: e };
-    }
-  }
-
-  const acctRes = await fetchWithRetry(() =>
-    _supabase.from('accounts').select('*').eq('user_id', userId).order('created_at')
-  );
-  if (!acctRes.error && acctRes.data) accounts = acctRes.data;
-
-  const tradeRes = await fetchWithRetry(() =>
-    _supabase.from('trades').select('*').eq('user_id', userId).order('date', { ascending: false })
-  );
-  if (!tradeRes.error && tradeRes.data) {
-    trades = tradeRes.data.map(t => ({ ...t, accountId: t.account_id }));
+  // Load trades — normalise account_id → accountId for existing JS
+  const { data: tradeData, error: tradeErr } = await _supabase
+    .from('trades').select('*').eq('user_id', userId).order('date', { ascending: false });
+  if (!tradeErr && tradeData) {
+    trades = tradeData.map(t => ({ ...t, accountId: t.account_id }));
   }
 
   loadEl.classList.add('hidden');
   document.getElementById('loginScreen').classList.add('hidden');
 
+  // Boot the app
   renderAccounts();
   populateAccountDropdown();
   render();
@@ -5598,48 +5578,38 @@ async function loadAppData(userId) {
   refreshEquityData();
 }
 
-let _appLoaded = false;
-
-if (_supabase) {
-
-  // ── 1. Check for an existing session immediately on page load ──
-  // This handles refresh/reload — we don't wait for onAuthStateChange
-  // which can be slow or fire with null before the session is restored.
-  _supabase.auth.getSession().then(async ({ data: { session } }) => {
-    if (session?.user && !_appLoaded) {
-      _appLoaded = true;
+// ── BOOT: check for existing session immediately on page load ──────
+// Using getSession() reads directly from localStorage — no network
+// round-trip needed. This fires before onAuthStateChange and prevents
+// the login screen from ever flashing on a reload.
+(async () => {
+  try {
+    const { data: { session } } = await _supabase.auth.getSession();
+    if (session?.user) {
       await loadAppData(session.user.id);
-    } else if (!session) {
+    } else {
       document.getElementById('appLoadingOverlay').classList.add('hidden');
       document.getElementById('loginScreen').classList.remove('hidden');
     }
-  }).catch(() => {
+  } catch (e) {
     document.getElementById('appLoadingOverlay').classList.add('hidden');
     document.getElementById('loginScreen').classList.remove('hidden');
-  });
+  }
+})();
 
-  // ── 2. Listen for sign in / sign out events ──
-  // SIGNED_IN: fires when user logs in fresh (not on reload — getSession handles that)
-  // SIGNED_OUT: fires when user logs out
-  _supabase.auth.onAuthStateChange(async (event, session) => {
-    if (event === 'SIGNED_IN' && session?.user && !_appLoaded) {
-      _appLoaded = true;
-      await loadAppData(session.user.id);
-    } else if (event === 'SIGNED_OUT') {
-      _appLoaded = false;
-      trades = []; accounts = [];
-      try { renderAccounts(); } catch(e) {}
-      try { populateAccountDropdown(); } catch(e) {}
-      try { render(); } catch(e) {}
-      document.getElementById('appLoadingOverlay').classList.add('hidden');
-      document.getElementById('loginScreen').classList.remove('hidden');
-    }
-  });
+// ── LIVE AUTH EVENTS (sign-in / sign-out only, not page reload) ────
+_supabase.auth.onAuthStateChange(async (event, session) => {
+  if (event === 'SIGNED_IN') {
+    // User just signed in from the login form
+    await loadAppData(session.user.id);
+  } else if (event === 'SIGNED_OUT') {
+    trades = []; accounts = [];
+    document.getElementById('appLoadingOverlay').classList.add('hidden');
+    document.getElementById('loginScreen').classList.remove('hidden');
+  }
+  // Ignore: INITIAL_SESSION, TOKEN_REFRESHED, USER_UPDATED, PASSWORD_RECOVERY
+});
 
-} else {
-  const _ol = document.getElementById('appLoadingOverlay');
-  if (_ol) _ol.classList.add('hidden');
-}
 
 </script>
 </body>
