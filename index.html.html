@@ -5518,10 +5518,13 @@ async function handleLogin() {
     if (error) { setLoginMsg(error.message); return; }
     setLoginMsg('Account created! Check your email to confirm, then sign in.', 'success');
   } else {
-    const { error } = await _supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
     setLoginLoading(false);
     if (error) { setLoginMsg(error.message); return; }
-    // onAuthStateChange will handle showing the app
+    if (data?.user) {
+      _appLoaded = true;
+      await loadAppData(data.user.id);
+    }
   }
 }
 
@@ -5537,6 +5540,7 @@ async function handleMagicLink() {
 
 async function handleSignOut() {
   await _supabase.auth.signOut();
+  _appLoaded = false;
   trades = []; accounts = [];
   try { renderAccounts(); } catch(e) {}
   try { populateAccountDropdown(); } catch(e) {}
@@ -5573,8 +5577,9 @@ async function loadAppData(userId) {
   refreshEquityData();
 }
 
+let _appLoaded = false;
+
 if (_supabase) {
-  let _appLoaded = false;
 
   // ── 1. Check for an existing session immediately on page load ──
   // This handles refresh/reload — we don't wait for onAuthStateChange
